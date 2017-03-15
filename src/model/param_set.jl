@@ -30,9 +30,9 @@
 
 @compat abstract type ParamSet end
 
-type StarPosParams <: ParamSet
-    u::Vector{Int}
-    StarPosParams() = new([1, 2])
+immutable StarPosParams <: ParamSet
+    u::UnitRange{Int}
+    StarPosParams() = new(1:2)
 end
 const star_ids = StarPosParams()
 getids(::Type{StarPosParams}) = star_ids
@@ -48,13 +48,13 @@ const gal_shape_ids = GalaxyShapeParams()
 getids(::Type{GalaxyShapeParams}) = gal_shape_ids
 length(::Type{GalaxyShapeParams}) = 3
 
-type GalaxyPosParams <: ParamSet
-    u::Vector{Int}
+immutable GalaxyPosParams <: ParamSet
+    u::UnitRange{Int}
     e_dev::Int
     e_axis::Int
     e_angle::Int
     e_scale::Int
-    GalaxyPosParams() = new([1, 2], 3, 4, 5, 6)
+    GalaxyPosParams() = new(1:2, 3, 4, 5, 6)
 end
 const gal_ids = GalaxyPosParams()
 getids(::Type{GalaxyPosParams}) = gal_ids
@@ -75,28 +75,28 @@ getids(::Type{BrightnessParams}) = bids
 length(::Type{BrightnessParams}) = 2 + 2 * (B-1)
 
 immutable CanonicalParams <: ParamSet
-    u::Vector{Int}
+    u::UnitRange{Int}
     e_dev::Int
     e_axis::Int
     e_angle::Int
     e_scale::Int
-    r1::Vector{Int}
-    r2::Vector{Int}
+    r1::UnitRange{Int}
+    r2::UnitRange{Int}
     c1::Matrix{Int}
     c2::Matrix{Int}
-    a::Vector{Int}
+    a::UnitRange{Int}
     k::Matrix{Int}
     function CanonicalParams()
-        new([1, 2], # u
+        new(1:2, # u
             3, # e_dev
             4, # e_axis
             5, # e_angle
             6, # e_scale
-            collect(7:(7+Ia-1)),  # r1
-            collect((7+Ia):(7+2Ia-1)), # r2
+            7:(7+Ia-1),  # r1
+            (7+Ia):(7+2Ia-1), # r2
             reshape((7+2Ia):(7+2Ia+(B-1)*Ia-1), (B-1, Ia)),  # c1
             reshape((7+2Ia+(B-1)*Ia):(7+2Ia+2*(B-1)*Ia-1), (B-1, Ia)),  # c2
-            collect((7+2Ia+2*(B-1)*Ia):(7+3Ia+2*(B-1)*Ia-1)),  # a
+            (7+2Ia+2*(B-1)*Ia):(7+3Ia+2*(B-1)*Ia-1),  # a
             reshape((7+3Ia+2*(B-1)*Ia):(7+3Ia+2*(B-1)*Ia+D*Ia-1), (D, Ia))) # k
     end
 end
@@ -159,10 +159,35 @@ align(::GalaxyShapeParams, GalaxyPosParams) =
   [gal_ids.e_axis; gal_ids.e_angle; gal_ids.e_scale]
 
 # The shape and brightness parameters for stars and galaxies respectively.
-const shape_standard_alignment = (ids.u,
-   [ids.u; ids.e_dev; ids.e_axis; ids.e_angle; ids.e_scale])
-bright_ids(i) = [ids.r1[i]; ids.r2[i]; ids.c1[:, i]; ids.c2[:, i]]
-const brightness_standard_alignment = (bright_ids(1), bright_ids(2))
+# const shape_standard_alignment = (ids.u,
+   # [ids.u; ids.e_dev; ids.e_axis; ids.e_angle; ids.e_scale])
+# FIXME! Hard coded for efficient.
+const shape_standard_alignment = (1:2, 1:6)
+# bright_ids(i) = [ids.r1[i]; ids.r2[i]; ids.c1[:, i]; ids.c2[:, i]]
+# const brightness_standard_alignment = (bright_ids(1), bright_ids(2))
+# FIXME! Hard coded for efficient.
+const brightness_standard_alignment =
+    (@SVector([ 7,
+                9,
+               11,
+               12,
+               13,
+               14,
+               19,
+               20,
+               21,
+               22]),
+     @SVector([ 8,
+               10,
+               15,
+               16,
+               17,
+               18,
+               23,
+               24,
+               25,
+               26]))
+
 
 # Note that gal_shape_alignment aligns the shape ids with the GalaxyPosParams,
 # not the CanonicalParams.
@@ -176,7 +201,7 @@ function get_id_names(ids::CanonicalParams)
             for i in 1:size(inds, 1), j in 1:size(inds, 2)
                 ids_names[inds[i, j]] = "$(name)_$(i)_$(j)"
             end
-        elseif isa(inds, Vector)
+        elseif isa(inds, Vector) || isa(inds, UnitRange)
             for i in eachindex(inds)
                 ids_names[inds[i]] = "$(name)_$(i)"
             end
