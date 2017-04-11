@@ -90,8 +90,8 @@ Read an SDSS \"frame\" FITS file and return a 4-tuple:
 - `sky`: 2-d sky that was subtracted.
 - `wcs`: WCSTransform constructed from image header.
 """
-function read_frame(fname, slurp::Bool = false)
-    f = FITSIO.FITS(slurp ? slurp_fits(fname) : fname)
+function read_frame(fname; data=nothing)
+    f = FITSIO.FITS(data != nothing ? data : fname)
     hdr = FITSIO.read_header(f[1], String)::String
     image = read(f[1])::Array{Float32, 2}  # sky-subtracted & calibrated data
     calibration = read(f[2])::Vector{Float32}
@@ -112,8 +112,8 @@ read_field_gains(fname, fieldnum)
 Return the image gains for field number `fieldnum` in an SDSS
 \"photoField\" file `fname`.
 """
-function read_field_gains(fname, fieldnum::Integer, slurp::Bool = false)
-    f = FITSIO.FITS(slurp ? slurp_fits(fname) : fname)
+function read_field_gains(fname, fieldnum::Integer; data=nothing)
+    f = FITSIO.FITS(data != nothing ? data : fname)
     fieldnums = read(f[2], "FIELD")::Vector{Int32}
     gains = read(f[2], "GAIN")::Array{Float32, 2}
     close(f)
@@ -137,8 +137,8 @@ Read a \"fpM\"-format SDSS file and return masked image ranges,
 based on `mask_planes`. Returns two `Vector{UnitRange{Int}}`,
 giving the range of x and y indicies to be masked.
 """
-function read_mask(fname, slurp::Bool=false, mask_planes=DEFAULT_MASK_PLANES)
-    f = FITSIO.FITS(slurp ? slurp_fits(fname) : fname)
+function read_mask(fname, mask_planes=DEFAULT_MASK_PLANES; data=nothing)
+    f = FITSIO.FITS(data != nothing ? data : fname)
 
     # The last (12th) HDU contains a key describing what each of the
     # other HDUs are. Use this to find the indicies of all the relevant
@@ -203,7 +203,8 @@ function load_raw_images(rcf::RunCamcolField, datadir, slurp::Bool = false, drop
 
     # read gain for each band
     photofield_name = "$subdir2/photoField-$(dec(rcf.run,6))-$(rcf.camcol).fits"
-    gains = read_field_gains(photofield_name, rcf.field, slurp)
+    gains = read_field_gains(photofield_name, rcf.field;
+                data=(slurp ? slurp_fits(photofield_name) : nothing))
 
     # open FITS file containing PSF for each band
     psf_name = "$(subdir3)/psField-$(dec(rcf.run,6))-$(rcf.camcol)-$(dec(rcf.field,4)).fit"
@@ -214,11 +215,13 @@ function load_raw_images(rcf::RunCamcolField, datadir, slurp::Bool = false, drop
     for (b, band) in enumerate(['u', 'g', 'r', 'i', 'z'])
         # load image data
         frame_name = "$(subdir3)/frame-$(band)-$(dec(rcf.run,6))-$(rcf.camcol)-$(dec(rcf.field,4)).fits"
-        pixels, calibration, sky, wcs = read_frame(frame_name, slurp)
+        pixels, calibration, sky, wcs = read_frame(frame_name;
+                data=(slurp ? slurp_fits(frame_name) : nothing))
 
         # read mask
         mask_name = "$(subdir3)/fpM-$(dec(rcf.run,6))-$(band)$(rcf.camcol)-$(dec(rcf.field,4)).fit"
-        mask_xranges, mask_yranges = read_mask(mask_name, slurp)
+        mask_xranges, mask_yranges = read_mask(mask_name;
+                data=(slurp ? slurp_fits(mask_name) : nothing))
 
         # apply mask
         for i=1:length(mask_xranges)
@@ -361,10 +364,10 @@ columns.
 The photoObj file format is documented here:
 https://data.sdss.org/datamodel/files/BOSS_PHOTOOBJ/RERUN/RUN/CAMCOL/photoObj.html
 """
-function read_photoobj(fname, band::Char='r', slurp::Bool=false)
+function read_photoobj(fname, band::Char='r'; data=nothing)
     b = BAND_CHAR_TO_NUM[band]
 
-    f = FITSIO.FITS(slurp ? slurp_fits(fname) : fname)
+    f = FITSIO.FITS(data != nothing ? data : fname)
 
     # sometimes the expected table extension is only an empty generic FITS
     # header, indicating no objects. We check explicitly for this case here
@@ -541,55 +544,8 @@ function convert(::Type{Vector{CatalogEntry}}, catalog::Dict{String, Any})
 end
 
 
-"""
-read_photoobj_files(fieldids, dirs) -> Vector{CatalogEntry}
-
-Combine photoobj catalogs for the given overlapping fields, returning a single
-joined catalog.
-
-The `duplicate_policy` argument controls how catalogs are joined.
-With `duplicate_policy = :primary`, only primary objects are included in the
-combined catalog.
-With `duplicate_policy = :first`, only the first detection is included in the
-combined catalog.
-"""
-function read_photoobj_files(fts::Vector{RunCamcolField},
-                             datadir;
-                             duplicate_policy=:primary,
-                             slurp::Bool = false,
-                             drop_quickly::Bool = false)
-    @assert duplicate_policy == :primary || duplicate_policy == :first
-    @assert duplicate_policy == :primary || length(fts) == 1
-
-    #Log.info("reading photoobj catalogs for $(length(fts)) fields")
-
-    # the code below assumes there is at least one field.
-    if length(fts) == 0
-        return CatalogEntry[]
-    end
-
-    # Read in all photoobj catalogs.
-    rawcatalogs = Vector{Dict}(length(fts))
-    for i in eachindex(fts)
-        ft = fts[i]
-        basedir = isa(datadir, String) ? datadir : datadir(ft)
-        dir = "$basedir/$(ft.run)/$(ft.camcol)/$(ft.field)"
-        fname = "$dir/photoObj-$(dec(ft.run,6))-$(dec(ft.camcol))-$(dec(ft.field,4)).fits"
-        #Log.info("field $(fts[i]): reading $fname")
-        po = read_photoobj(fname, 'r', slurp)
-        if !drop_quickly
-            rawcatalogs[i] = po
-        end
-    end
-
-    if drop_quickly
-        return CatalogEntry[]
-    end
-
-    #for i in eachindex(fts)
-    #    Log.info("field $(fts[i]): $(length(rawcatalogs[i]["objid"])) entries")
-    #end
-
+function assemble_catalog(rawcatalogs::Vector{Dict};
+                          duplicate_policy=:primary)
     # Limit each catalog to primary objects and objects where thing_id != -1
     # (thing_id == -1 indicates that the matching process failed)
     for cat in rawcatalogs
@@ -629,6 +585,58 @@ function read_photoobj_files(fts::Vector{RunCamcolField},
 end
 
 
+"""
+read_photoobj_files(fieldids, dirs) -> Vector{CatalogEntry}
+
+Combine photoobj catalogs for the given overlapping fields, returning a single
+joined catalog.
+
+The `duplicate_policy` argument controls how catalogs are joined.
+With `duplicate_policy = :primary`, only primary objects are included in the
+combined catalog.
+With `duplicate_policy = :first`, only the first detection is included in the
+combined catalog.
+"""
+function read_photoobj_files(fts::Vector{RunCamcolField}, datadir;
+                             duplicate_policy=:primary,
+                             slurp::Bool = false, drop_quickly::Bool = false)
+    @assert duplicate_policy == :primary || duplicate_policy == :first
+    @assert duplicate_policy == :primary || length(fts) == 1
+
+    #Log.info("reading photoobj catalogs for $(length(fts)) fields")
+
+    # the code below assumes there is at least one field.
+    if length(fts) == 0
+        return CatalogEntry[]
+    end
+
+    # Read in all photoobj catalogs.
+    rawcatalogs = Vector{Dict}(length(fts))
+    for i in eachindex(fts)
+        ft = fts[i]
+        basedir = isa(datadir, String) ? datadir : datadir(ft)
+        dir = "$basedir/$(ft.run)/$(ft.camcol)/$(ft.field)"
+        fname = "$dir/photoObj-$(dec(ft.run,6))-$(dec(ft.camcol))-$(dec(ft.field,4)).fits"
+        #Log.info("field $(fts[i]): reading $fname")
+        po = read_photoobj(fname, 'r';
+                           data=(slurp ? slurp_fits(fname) : nothing))
+        if !drop_quickly
+            rawcatalogs[i] = po
+        end
+    end
+
+    if drop_quickly
+        return CatalogEntry[]
+    end
+
+    #for i in eachindex(fts)
+    #    Log.info("field $(fts[i]): $(length(rawcatalogs[i]["objid"])) entries")
+    #end
+
+    return assemble_catalog(rawcatalogs; duplicate_policy=duplicate_policy)
+end
+
+
 # TODO: this is obsolete, remove it.
 """
 read_photoobj_celeste(fname)
@@ -639,5 +647,116 @@ function read_photoobj_celeste(fname)
     rawcatalog = read_photoobj(fname)
     convert(Vector{CatalogEntry}, rawcatalog)
 end
+
+
+# -----------------------------------------------------------------------------
+# big file I/O
+
+const NumRuns = 761
+const NumCamcols = 6
+const EachPhotoField = 3*1024*1024
+
+const NumRCFs = 924038
+const EachRCF = 76*1024*1024
+const EachBigFile = 2199023255552
+const NumRCFFiles = 12
+const MaxRCFFileSize = 12*1024*1024
+
+
+immutable BigFileIO
+    num_bf::Int
+    fds::Vector{Cint}
+    pffd::Cint
+end
+
+
+function init_bigfile_io(datadir::String)
+    all_b = NumRCFs * EachRCF
+    quot, rem = divrem(all_b, EachBigFile)
+    num_bf = quot + (rem > 0 ? 1 : 0)
+    fds = Vector{Cint}(num_bf)
+    for i = 1:num_bf
+        fn = joinpath(datadir, "celeste_sdss-$i")
+        fds[i] = ccall(:open, Cint, (Ptr{UInt8}, Cint, Cint), fn,
+                       Base.Filesystem.JL_O_RDONLY, 0)
+        systemerror("open", fds[i] == -1)
+    end
+
+    fn = joinpath(datadir, "celeste_sdss-photofields")
+    pffd = ccall(:open, Cint, (Ptr{UInt8}, Cint, Cint), fn,
+                       Base.Filesystem.JL_O_RDONLY, 0)
+    systemerror("open", pffd == -1)
+
+    return BigFileIO(num_bf, fds, pffd)
+end
+
+
+function shutdown_bigfile_io(bfo::BigFileIO)
+    ccall(:close, Cint, (Cint,), bfo.pffd)
+    bfo.pffd = convert(Cint, -1)
+    for i = 1:bfo.num_bf
+        ccall(:close, Cint, (Cint,), bfo.fds[i])
+    end
+    bfo.num_bf = 0
+    empty!(bfo.fds)
+end
+
+
+function read_bigfile_photoobjs(bfo::BigFileIO,
+                                rcfs::Vector{RunCamcolField},
+                                run_idx_map::Dict{Int16,Int16},
+                                datadir::String;
+                                duplicate_policy=:primary,
+                                drop_quickly=false)
+    @assert duplicate_policy == :primary || duplicate_policy == :first
+    @assert duplicate_policy == :primary || length(fts) == 1
+
+    if length(rcfs) == 0
+        return CatalogEntry[]
+    end
+
+    rawcatalogs = Vector{Dict}(length(rcfs))
+    for i in eachindex(rcfs)
+        rcf = rcfs[i]
+        pidx = (run_idx_map[rcf.run] * NumCamcols * EachPhotoField) +
+               ((run.camcol - 1) * EachPhotoField)
+        data = Vector{UInt8}(EachPhotoField)
+        rsize = ccall(:pread, Cint, (Cint, Ptr{UInt8}, Csize_t, Csize_t),
+                      bfo.pffd, data, EachPhotoField, pidx)
+        systemerror("pread", rsize != EachPhotoField)
+        po = read_photoobj(""; data=data)
+        if !drop_quickly
+            rawcatalogs[i] = po
+        end
+    end
+
+    if drop_quickly
+        return CatalogEntry[]
+    end
+
+    return assemble_catalog(rawcatalogs; duplicate_policy=duplicate_policy)
+end
+
+
+function read_bigfile_images(bfo::BigFileIO,
+                             rcfs::Vector{RunCamcolField},
+                             rcf_idx_map::Dict{RunCamcolField,Int32},
+                             datadir::String)
+#=
+            long bfidx, bfofs;
+            res = ldiv(item * EACH_RCF, EACH_BIGFILE);
+            bfidx = res.quot;
+            bfofs = res.rem;
+=#
+    for rcf in rcfs
+        ridx = rcf_idx_map[rcf] - 1
+        bfidx, bfofs = divrem(ridx * EachRCF, EachBigFile)
+        bfidx += 1
+        fofs = Vector{Int64}(NumRCFFiles)
+        rsize = ccall(:read, Cint, (Cint, Ptr{UInt8}, Csize_t), fd, data, size)
+        systemerror("pread", rsize != EachRCF)
+
+end
+
 
 end  # module
