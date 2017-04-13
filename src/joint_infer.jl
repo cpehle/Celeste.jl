@@ -1,6 +1,7 @@
 import FITSIO
 import JLD
 using DataStructures
+using NLSolversBase
 
 import ..Log
 using ..Model
@@ -11,7 +12,7 @@ import ..PSF
 
 using ..DeterministicVI
 using ..DeterministicVI.ConstraintTransforms: ConstraintBatch, DEFAULT_CHUNK
-using ..DeterministicVI.ElboMaximize: Config, maximize!
+using ..DeterministicVI.ElboMaximize: Config, Objective, Gradient, Hessian, maximize!
 
 
 # 20 minute threshold
@@ -758,10 +759,28 @@ function process_sources_kernel!(ea_vec::Vector{ElboArgs},
         if within_batch_shuffling
             shuffle!(source_assignment)
         end
-	
 	#tic()
+        ea  =  ea_vec[source_assignment[1]]
+        vp  =  vp_vec[source_assignment[1]]
+        cfg = cfg_vec[source_assignment[1]]
+
+        f   = Objective(ea, vp, cfg)
+        g!  = Gradient(ea, vp, cfg)
+        h!  = Hessian(ea, vp, cfg)
+        function fg!(x::Vector, storage::Vector)
+            g!(x, storage)
+            return f(x)
+        end
+
+        p = length(cfg.free_initial_input)
+        T = eltype(cfg.free_initial_input)
+        obj = TwiceDifferentiable(f, g!, fg!, h!,
+                                  T(NaN), zeros(T, p), zeros(T, p, p),
+                                  zeros(T, p), zeros(T, p), zeros(T, p),
+                                  [1], [1], [1])
+
         for i in source_assignment
-            maximize!(ea_vec[i], vp_vec[i], cfg_vec[i])
+            maximize!(ea_vec[i], vp_vec[i], cfg_vec[i], obj)
             if cfg_vec[i].optim_options.callback.killed
                 break
             end
