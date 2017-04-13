@@ -217,15 +217,33 @@ end
 # maximize! #
 #############
 
-function maximize!(ea::ElboArgs, vp::VariationalParams{Float64}, cfg::Config = Config(ea, vp))
+function maximize!(ea::ElboArgs, vp::VariationalParams{Float64}, cfg::Config = Config(ea, vp),
+    obj::AbstractObjective = TwiceDifferentiable(Objective(ea, vp, cfg),
+                                                  Gradient(ea, vp, cfg),
+                                                   Hessian(ea, vp, cfg)))
+
     enforce_references!(ea, vp, cfg)
     enforce!(cfg.bound_params, cfg.constraints)
     to_free!(cfg.free_params, cfg.bound_params, cfg.constraints)
     to_flat_vector!(cfg.free_initial_input, cfg.free_params)
     fill!(cfg.free_previous_input, NaN)
     R = Optim.MultivariateOptimizationResults{Float64,1,Optim.NewtonTrustRegion{Float64}}
-    result::R = Optim.optimize(Objective(ea, vp, cfg), Gradient(ea, vp, cfg), Hessian(ea, vp, cfg),
-                               cfg.free_initial_input, cfg.trust_region, cfg.optim_options)
+
+    f  = Objective(ea, vp, cfg)
+    g! = Gradient(ea, vp, cfg)
+    h! = Hessian(ea, vp, cfg)
+
+    function fg!(x::Vector, storage::Vector)
+        g!(x, storage)
+        return f(x)
+    end
+
+    obj.f   = f
+    obj.g!  = g!
+    obj.fg! = fg!
+    obj.h!  = h!
+
+    result::R = Optim.optimize(obj, cfg.free_initial_input, cfg.trust_region, cfg.optim_options)
     min_value::Float64 = -(Optim.minimum(result))
     min_solution::Vector{Float64} = Optim.minimizer(result)
     to_variational_params!(cfg.free_params, min_solution)

@@ -613,8 +613,27 @@ function process_sources_kernel!(ea_vec::Vector{ElboArgs},
         if within_batch_shuffling
             shuffle!(source_assignment)
         end
+        ea  =  ea_vec[source_assignment[1]]
+        vp  =  vp_vec[source_assignment[1]]
+        cfg = cfg_vec[source_assignment[1]]
+
+        f   = Objective(ea, vp, cfg)
+        g!  = Gradient(ea, vp, cfg)
+        h!  = Hessian(ea, vp, cfg)
+        function fg!(x::Vector, storage::Vector)
+            g!(x, storage)
+            return f(x)
+        end
+
+        p = length(cfg.free_initial_input)
+        T = eltype(cfg.free_initial_input)
+        obj = TwiceDifferentiable(f, g!, fg!, h!,
+                                  T(NaN), zeros(T, p), zeros(T, p, p),
+                                  zeros(T, p), zeros(T, p), zeros(T, p),
+                                  [1], [1], [1])
+
         for i in source_assignment
-            maximize!(ea_vec[i], vp_vec[i], cfg_vec[i])
+            maximize!(ea_vec[i], vp_vec[i], cfg_vec[i], obj)
         end
     catch ex
         if is_production_run || nthreads() > 1
