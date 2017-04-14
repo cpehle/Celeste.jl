@@ -676,6 +676,51 @@ function process_sources_dynamic!(images::Vector{Model.Image},
     total_idle_time = 0
     total_sum_of_thread_times = 0
 
+    cfg       = cfg_vec[1]
+    initial_x = cfg.free_initial_input
+    objvec   = Vector{TwiceDifferentiable{Float64}}(length(initial_x))
+    statevec = Vector{Optim.NewtonTrustRegionState{Float64,1}}(length(initial_x))
+    for i in 1:Threads.nthreads()
+        ea  =  ea_vec[1]
+        vp  =  vp_vec[1]
+        cfg = cfg_vec[1]
+
+        f   = Objective(ea, vp, cfg)
+        g!  = Gradient(ea, vp, cfg)
+        h!  = Hessian(ea, vp, cfg)
+        function fg!(x::Vector, storage::Vector)
+            g!(x, storage)
+            return f(x)
+        end
+
+        # T = eltype(cfg.free_initial_input)
+        cfg       = cfg_vec[1]
+        initial_x = cfg.free_initial_input
+        T         = Float64
+        p         = length(cfg.free_initial_input)
+
+        objvec[i] = TwiceDifferentiable(f, g!, fg!, h!,
+                                  T(NaN), zeros(T, p), zeros(T, p, p),
+                                  zeros(T, p), zeros(T, p), zeros(T, p),
+                                  [1], [1], [1])
+        statevec[i] =
+    Optim.NewtonTrustRegionState("Newton's Method (Trust Region)", # Store string with model name in state.method
+                         length(initial_x),
+                         copy(initial_x), # Maintain current state in state.x
+                         similar(initial_x), # Maintain previous state in state.x_previous
+                         T(NaN),
+                         # similar(gradient(d)), # Store previous gradient in state.g_previous
+                         similar(initial_x), # Maintain current search direction in state.s
+                         similar(initial_x), # buffer of same type and size as stats.s
+                         similar(initial_x), # buffer of same type and size as stats.s
+                         # Symmetric(Matrix{T}(n,n), :L),     # buffer of HλI
+                         # Optim.Cholesky2{T}(Matrix{T}(n,n), 'L', 0), # buffer for Cholesky
+                         T(cfg.trust_region.initial_δ),
+                         NaN,
+                         cfg.trust_region.η, # η
+                         zero(T)) # ρ
+    end
+
     for iter in 1:n_iters
 
         # Process every batch of every iteration. We do the batches on the outside
@@ -708,7 +753,7 @@ function process_sources_dynamic!(images::Vector{Model.Image},
 
                         process_sources_kernel!(ea_vec, vp_vec, cfg_vec,
                                                 thread_sources_assignment[batch::Int][cc_index],
-                                                within_batch_shuffling)
+                                                within_batch_shuffling, objvec, statevec)
                         if kill_switch != nothing && kill_switch.killed
                             break
                         end
@@ -752,7 +797,7 @@ function process_sources_kernel!(ea_vec::Vector{ElboArgs},
                                  vp_vec::Vector{VariationalParams{Float64}},
                                  cfg_vec::Vector{Config{DEFAULT_CHUNK,Float64}},
                                  source_assignment::Vector{Int64},
-                                 within_batch_shuffling::Bool)
+                                 within_batch_shuffling::Bool, objvec, statevec)
     try
         # Shuffle the source assignments within each batch of each process.
         # This is disabled by default because it ruins the deterministic outcome
@@ -761,45 +806,11 @@ function process_sources_kernel!(ea_vec::Vector{ElboArgs},
             shuffle!(source_assignment)
         end
 	#tic()
-        ea  =  ea_vec[source_assignment[1]]
-        vp  =  vp_vec[source_assignment[1]]
-        cfg = cfg_vec[source_assignment[1]]
-
-        f   = Objective(ea, vp, cfg)
-        g!  = Gradient(ea, vp, cfg)
-        h!  = Hessian(ea, vp, cfg)
-        function fg!(x::Vector, storage::Vector)
-            g!(x, storage)
-            return f(x)
-        end
-
-        p = length(cfg.free_initial_input)
-        T = eltype(cfg.free_initial_input)
-        obj = TwiceDifferentiable(f, g!, fg!, h!,
-                                  T(NaN), zeros(T, p), zeros(T, p, p),
-                                  zeros(T, p), zeros(T, p), zeros(T, p),
-                                  [1], [1], [1])
 
         # state = Optim.initial_state(cfg.trust_region, cfg.optim_options, obj, cfg.free_initial_input)
 
-        initial_x = cfg.free_initial_input
-        n         = length(initial_x)
-
-        state = Optim.NewtonTrustRegionState("Newton's Method (Trust Region)", # Store string with model name in state.method
-                         length(initial_x),
-                         copy(initial_x), # Maintain current state in state.x
-                         similar(initial_x), # Maintain previous state in state.x_previous
-                         T(NaN),
-                         # similar(gradient(d)), # Store previous gradient in state.g_previous
-                         similar(initial_x), # Maintain current search direction in state.s
-                         similar(initial_x), # buffer of same type and size as stats.s
-                         similar(initial_x), # buffer of same type and size as stats.s
-                         # Symmetric(Matrix{T}(n,n), :L),     # buffer of HλI
-                         # Optim.Cholesky2{T}(Matrix{T}(n,n), 'L', 0), # buffer for Cholesky
-                         T(cfg.trust_region.initial_δ),
-                         NaN,
-                         cfg.trust_region.η, # η
-                         zero(T)) # ρ
+        obj   = objvec[Threads.threadid()]
+        state = statevec[Threads.threadid()]
 
         for i in source_assignment
             maximize!(ea_vec[i], vp_vec[i], state, cfg_vec[i], obj)
