@@ -2,6 +2,7 @@ import FITSIO
 import JLD
 using DataStructures
 using NLSolversBase
+using Optim
 
 import ..Log
 using ..Model
@@ -779,18 +780,28 @@ function process_sources_kernel!(ea_vec::Vector{ElboArgs},
                                   zeros(T, p), zeros(T, p), zeros(T, p),
                                   [1], [1], [1])
 
-        state = initial_state(cfg.trust_region, cfg.optim_options, obj, cfg.free_initial_input)
+        # state = Optim.initial_state(cfg.trust_region, cfg.optim_options, obj, cfg.free_initial_input)
+
+        initial_x = cfg.free_initial_input
+        n         = length(initial_x)
+
+        state = Optim.NewtonTrustRegionState("Newton's Method (Trust Region)", # Store string with model name in state.method
+                         length(initial_x),
+                         copy(initial_x), # Maintain current state in state.x
+                         similar(initial_x), # Maintain previous state in state.x_previous
+                         T(NaN),
+                         # similar(gradient(d)), # Store previous gradient in state.g_previous
+                         similar(initial_x), # Maintain current search direction in state.s
+                         similar(initial_x), # buffer of same type and size as stats.s
+                         Symmetric(Matrix{T}(n,n), :L),     # buffer of HλI
+                         Optim.Cholesky2{T}(Matrix{T}(n,n), 'L', 0), # buffer for Cholesky
+                         T(cfg.trust_region.initial_δ),
+                         NaN,
+                         cfg.trust_region.η, # η
+                         zero(T)) # ρ
 
         for i in source_assignment
-            cfg = cfg_vec[i]
-            state.δ = cfg.trust_region.initial_δ
-            state.η = cfg.trust_region.η
-            state.ρ = zero(state.ρ)
-
-            value_gradient!(obj, cfg.free_initial_input)
-            hessian!(obj, cfg.free_initial_input)
-
-            maximize!(ea_vec[i], vp_vec[i], cfg_vec[i], obj, state)
+            maximize!(ea_vec[i], vp_vec[i], state, cfg_vec[i], obj)
             if cfg_vec[i].optim_options.callback.killed
                 break
             end

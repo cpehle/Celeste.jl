@@ -223,11 +223,11 @@ end
 # maximize! #
 #############
 
-function maximize!(ea::ElboArgs, vp::VariationalParams{Float64}, cfg::Config = Config(ea, vp),
+function maximize!(ea::ElboArgs, vp::VariationalParams{Float64}, state, cfg::Config = Config(ea, vp),
     obj::AbstractObjective = TwiceDifferentiable(Objective(ea, vp, cfg),
                                                   Gradient(ea, vp, cfg),
-                                                   Hessian(ea, vp, cfg)),
-    state = initial_state(cfg.trust_region, cfg.optim_options, obj, cfg.free_initial_input))
+                                                   Hessian(ea, vp, cfg)))#=,
+    state = Optim.initial_state(cfg.trust_region, cfg.optim_options, obj, cfg.free_initial_input))=#
 
     enforce_references!(ea, vp, cfg)
     enforce!(cfg.bound_params, cfg.constraints)
@@ -250,6 +250,15 @@ function maximize!(ea::ElboArgs, vp::VariationalParams{Float64}, cfg::Config = C
     obj.fg! = fg!
     obj.h!  = h!
 
+    state.δ = cfg.trust_region.initial_δ
+    state.η = cfg.trust_region.η
+    state.ρ = zero(state.ρ)
+
+    value_gradient!(obj, cfg.free_initial_input)
+    hessian!(obj, cfg.free_initial_input)
+    copy!(state.x, cfg.free_initial_input)
+
+# state = Optim.initial_state(cfg.trust_region, cfg.optim_options, obj, cfg.free_initial_input)
     result::R = Optim.optimize(obj, cfg.free_initial_input, cfg.trust_region, cfg.optim_options, state)
     min_value::Float64 = -(Optim.minimum(result))
     min_solution::Vector{Float64} = Optim.minimizer(result)

@@ -45,7 +45,7 @@ function exception(exception::Exception, msg...)
     end
     buf = IOBuffer()
     Base.showerror(buf, exception)
-    error(takebuf_string(buf))
+    error(String(take!(buf)))
     if !is_production_run
         error("Stack trace:")
         if length(stack_trace) > 100
