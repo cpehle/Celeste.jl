@@ -779,8 +779,18 @@ function process_sources_kernel!(ea_vec::Vector{ElboArgs},
                                   zeros(T, p), zeros(T, p), zeros(T, p),
                                   [1], [1], [1])
 
+        state = initial_state(cfg.trust_region, cfg.optim_options, obj, cfg.free_initial_input)
+
         for i in source_assignment
-            maximize!(ea_vec[i], vp_vec[i], cfg_vec[i], obj)
+            cfg = cfg_vec[i]
+            state.δ = cfg.trust_region.initial_δ
+            state.η = cfg.trust_region.η
+            state.ρ = zero(state.ρ)
+
+            value_gradient!(obj, cfg.free_initial_input)
+            hessian!(obj, cfg.free_initial_input)
+
+            maximize!(ea_vec[i], vp_vec[i], cfg_vec[i], obj, state)
             if cfg_vec[i].optim_options.callback.killed
                 break
             end
