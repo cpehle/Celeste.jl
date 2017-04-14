@@ -793,8 +793,9 @@ function process_sources_kernel!(ea_vec::Vector{ElboArgs},
                          # similar(gradient(d)), # Store previous gradient in state.g_previous
                          similar(initial_x), # Maintain current search direction in state.s
                          similar(initial_x), # buffer of same type and size as stats.s
-                         Symmetric(Matrix{T}(n,n), :L),     # buffer of HλI
-                         Optim.Cholesky2{T}(Matrix{T}(n,n), 'L', 0), # buffer for Cholesky
+                         similar(initial_x), # buffer of same type and size as stats.s
+                         # Symmetric(Matrix{T}(n,n), :L),     # buffer of HλI
+                         # Optim.Cholesky2{T}(Matrix{T}(n,n), 'L', 0), # buffer for Cholesky
                          T(cfg.trust_region.initial_δ),
                          NaN,
                          cfg.trust_region.η, # η

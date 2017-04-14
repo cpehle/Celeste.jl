@@ -256,7 +256,8 @@ function maximize!(ea::ElboArgs, vp::VariationalParams{Float64}, state, cfg::Con
 
     value_gradient!(obj, cfg.free_initial_input)
     hessian!(obj, cfg.free_initial_input)
-    copy!(state.x, cfg.free_initial_input)
+    # copy!(state.x, cfg.free_initial_input)
+    state.x = copy(cfg.free_initial_input)
 
 # state = Optim.initial_state(cfg.trust_region, cfg.optim_options, obj, cfg.free_initial_input)
     result::R = Optim.optimize(obj, cfg.free_initial_input, cfg.trust_region, cfg.optim_options, state)
