@@ -21,8 +21,7 @@ function benchmark_one_light_source()
     box = BoundingBox(347.7444, 347.7446, 16.6202, 16.6204)
     rcfs = [RunCamcolField(7713, 3, 152)]
 
-    strategy = PlainFITSStrategy(datadir)
-    ctni = infer_init(rcfs, strategy; box=box)[1:4]
+    ctni = infer_init(rcfs, PlainFITSStrategy(datadir); box=box)[1:4]
 
     # Warm up---this compiles the code
     one_node_joint_infer(ctni...)
