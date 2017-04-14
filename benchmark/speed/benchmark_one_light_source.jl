@@ -1,9 +1,8 @@
 #!/usr/bin/env julia
 
 import Celeste.ParallelRun: one_node_joint_infer, infer_init, BoundingBox
-import Celeste.SDSSIO: RunCamcolField, load_field_images
+import Celeste.SDSSIO: PlainFITSStrategy, RunCamcolField, load_field_images
 import Celeste.Infer: find_neighbors
-
 
 const datadir = joinpath(Pkg.dir("Celeste"), "test", "data")
 if ccall(:jl_generating_output, Cint, ()) == 0
@@ -22,7 +21,8 @@ function benchmark_one_light_source()
     box = BoundingBox(347.7444, 347.7446, 16.6202, 16.6204)
     rcfs = [RunCamcolField(7713, 3, 152)]
 
-    ctni = infer_init(rcfs, datadir; box=box)[1:4]
+    strategy = PlainFITSStrategy(datadir)
+    ctni = infer_init(rcfs, strategy; box=box)[1:4]
 
     # Warm up---this compiles the code
     one_node_joint_infer(ctni...)
